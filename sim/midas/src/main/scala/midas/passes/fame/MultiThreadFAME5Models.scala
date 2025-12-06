@@ -183,10 +183,12 @@ object MultiThreadFAME5Models extends Transform {
 
     val nThreads            = fame5InstancesByModule.headOption.map(_._2.size).getOrElse(1)
     val circuitNS           = Namespace(state.circuit)
+    val excludedModuleNames = excludedModules.map(_.value).toSet
+    
     val threadedModuleNames = state.circuit.modules
       .collect({
-        // Don't replace blackbox instances! TODO: Check for illegal blackboxes.
-        case m: Module => m.name -> circuitNS.newName(s"${m.name}_threaded")
+        case m: Module if !excludedModuleNames.contains(m.name) => 
+          m.name -> circuitNS.newName(s"${m.name}_threaded")
       })
       .toMap
 
