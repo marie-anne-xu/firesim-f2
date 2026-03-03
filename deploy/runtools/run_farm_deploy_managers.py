@@ -701,7 +701,10 @@ class EC2InstanceDeployManager(InstanceDeployManager):
             )
             with warn_only():
                 run("git clone https://github.com/firesim/aws-fpga-firesim-f2.git aws-fpga") #rh: "git clone https://github.com/aws/aws-fpga"
-                run("cd aws-fpga && git checkout " + aws_fpga_upstream_version) #rh: keep in mind that if ts says dirty it will fail but continue doing sdk_setup
+                run("cd aws-fpga")
+                run("git remote add xdma git@github.com:marie-anne-xu/aws-fpga-preview.git")
+                run("git checkout " + aws_fpga_upstream_version)
+                # run("cd aws-fpga && git checkout " + aws_fpga_upstream_version) #rh: keep in mind that if ts says dirty it will fail but continue doing sdk_setup
             with cd(f"/home/{os.environ['USER']}/aws-fpga"):
                 run("source sdk_setup.sh")
 
