@@ -148,6 +148,10 @@ object MultiThreadFAME5Models extends Transform {
     // val doNotMT = state.annotations.collect {
     //   case FirrtlDoNotMultiThreadAnnotation(it) => it
     // }.toSet
+    // Collect excluded modules from annotations
+    val excludedModules = state.annotations.collect {
+      case FirrtlExcludeFromMultiThreadingAnnotation(it) => OfModule(it.ofModule)
+    }.toSet
 
     // Populate keys from annotations, values from traversing statements
     val fame5RawInstances = new mutable.LinkedHashMap[OfModule, mutable.LinkedHashSet[Instance]]
