@@ -178,6 +178,8 @@ for attempt in 1 2 3; do
 
     TOKEN=""
 done
+# TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"\
+#          --connect-timeout 1 -m 3) || true
 if [ -n "$TOKEN" ]; then
 
     (
