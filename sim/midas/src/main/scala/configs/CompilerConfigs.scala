@@ -164,3 +164,10 @@ class DefaultVitisConfig
       new BaseBridgesConfig ++
         new midas.VitisConfig
     )
+
+// DefaultF2Config: simple F2 config without EC2-specific PCIM ports.
+// Placed here (midas package) so GoldenGateMain can find it via -ggcp search.
+class DefaultF2Config
+    extends Config(
+      new midas.F2Config
+    )
