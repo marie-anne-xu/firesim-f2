@@ -167,7 +167,15 @@ class DefaultVitisConfig
 
 // DefaultF2Config: simple F2 config without EC2-specific PCIM ports.
 // Placed here (midas package) so GoldenGateMain can find it via -ggcp search.
+// Mirrors BaseF2Config's mixin chain but uses midas.F2Config (non-EC2) in
+// place of midas.EC2F2Config. The MemModel + WiringTransform + AsyncReset
+// + BaseBridges mixins are required — without them, FASED fails Chisel
+// elaboration with "Key MemModelKey is not defined in Parameters".
 class DefaultF2Config
     extends Config(
-      new midas.F2Config
+      new WithDefaultMemModel ++
+        new WithWiringTransform ++
+        new WithAsyncResetReplacement ++
+        new BaseBridgesConfig ++
+        new midas.F2Config
     )
