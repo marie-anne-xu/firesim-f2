@@ -12,7 +12,7 @@ import firrtl.Utils.BoolType
 import firrtl.passes.InlineAnnotation
 import firrtl.transforms.DontTouchAnnotation
 
-import midas.targetutils.FirrtlEnableModelMultiThreadingAnnotation
+import midas.targetutils.{FirrtlEnableModelMultiThreadingAnnotation, FirrtlExcludeFromMultiThreadingAnnotation}
 
 import collection.mutable
 

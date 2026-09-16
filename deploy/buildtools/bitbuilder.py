@@ -329,10 +329,88 @@ class F2BitBuilder(BitBuilder):
         fpga_frequency = self.build_config.get_frequency()
         build_strategy = self.build_config.get_strategy().name
 
-        with InfoStreamLogger("stdout"), settings(warn_only=True):
-            vivado_result = run(
-                f"{cl_dir}/build-bitstream.sh --cl_dir {cl_dir} --frequency {fpga_frequency} --strategy {build_strategy}"
+        # retrieve PR settings (optional, defaults to false)
+        enable_pr = self.build_config.get_enable_pr()
+        pr_module_name = self.build_config.get_pr_module_name()
+        pr_partition_path = self.build_config.get_pr_partition_path()
+        pr_base_dcp = self.build_config.get_pr_project_path()
+        pr_base_recipe = self.build_config.get_pr_base_recipe()
+
+        # Resolve pr_base_recipe -> base routed DCP. Non-project mode needs only a
+        # checkpoint, so unlike U250 there is no base_project copy to make.
+        if enable_pr and pr_base_recipe and not pr_base_dcp:
+            all_recipes = self.build_config.build_config_file.all_build_recipes
+            if pr_base_recipe not in all_recipes:
+                raise Exception(
+                    f"pr_base_recipe '{pr_base_recipe}' not found in config_build_recipes.yaml"
+                )
+            base = all_recipes[pr_base_recipe]
+            base_quintuplet = (
+                f"{self.build_config.PLATFORM}-{base['TARGET_PROJECT']}-"
+                f"{base['DESIGN']}-{base['TARGET_CONFIG']}-{base['PLATFORM_CONFIG']}"
             )
+
+            # results-build is on the manager, so search locally.
+            results_build_dir = f"{local_deploy_dir}/results-build"
+            with settings(warn_only=True):
+                find_result = local(
+                    f"ls -d {results_build_dir}/*-{pr_base_recipe} 2>/dev/null | sort | tail -1",
+                    capture=True,
+                )
+            if find_result.return_code != 0 or not str(find_result).strip():
+                raise Exception(
+                    f"No completed build found for base recipe '{pr_base_recipe}' in "
+                    f"{results_build_dir}. Has the base recipe been built successfully?"
+                )
+            base_cl_dir = f"{str(find_result).strip()}/cl_{base_quintuplet}"
+
+            # "*.post_route.dcp" deliberately excludes "*.post_route.VIOLATED.dcp".
+            with settings(warn_only=True):
+                dcp_result = local(
+                    f"ls -1 {base_cl_dir}/build/checkpoints/*.post_route.dcp 2>/dev/null | sort | tail -1",
+                    capture=True,
+                )
+            if dcp_result.return_code != 0 or not str(dcp_result).strip():
+                raise Exception(
+                    f"No post_route.dcp in {base_cl_dir}/build/checkpoints/ for base recipe "
+                    f"'{pr_base_recipe}'. If only a *.post_route.VIOLATED.dcp is present, that "
+                    f"base build failed timing and must not be used as a PR base."
+                )
+            local_base_dcp = str(dcp_result).strip()
+            rootLogger.info(
+                f"Resolved pr_base_recipe '{pr_base_recipe}' -> {local_base_dcp}"
+            )
+
+            # Ship it to the build host; the base results live on the manager.
+            pr_base_dcp = f"{cl_dir}/build/checkpoints/{os.path.basename(local_base_dcp)}"
+            rsync_cap = rsync_project(
+                local_dir=local_base_dcp,
+                remote_dir=f"{cl_dir}/build/checkpoints/",
+                ssh_opts="-o StrictHostKeyChecking=no",
+                extra_opts="-L",
+                capture=True,
+            )
+            rootLogger.debug(rsync_cap)
+            rootLogger.debug(rsync_cap.stderr)
+
+        # Build the command with optional PR arguments
+        build_cmd = f"{cl_dir}/build-bitstream.sh --cl_dir {cl_dir} --frequency {fpga_frequency} --strategy {build_strategy}"
+        if enable_pr:
+            build_cmd += " --enable_pr true"
+            if pr_module_name:
+                build_cmd += f" --pr_module_name {','.join(pr_module_name)}"
+            if pr_partition_path:
+                if isinstance(pr_partition_path, list):
+                    build_cmd += f" --pr_partition_path {','.join(pr_partition_path)}"
+                else:
+                    build_cmd += f" --pr_partition_path {pr_partition_path}"
+            # Presence of the base DCP selects the child (RM swap) flow, the way
+            # pr_project_path does on U250.
+            if pr_base_dcp:
+                build_cmd += f" --pr_base_dcp {pr_base_dcp}"
+
+        with InfoStreamLogger("stdout"), settings(warn_only=True):
+            vivado_result = run(build_cmd)
             vivado_rc = vivado_result.return_code
 
             if vivado_result != 0:
