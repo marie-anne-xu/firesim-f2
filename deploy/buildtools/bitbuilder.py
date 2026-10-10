@@ -238,7 +238,21 @@ class F2BitBuilder(BitBuilder):
         with prefix("cd " + dest_f2_platform_dir):
             run("git clone https://github.com/firesim/aws-fpga-firesim-f2.git")
         with prefix("cd " + dest_awsfpga_dir):
-            run("git checkout " + aws_fpga_upstream_version)
+            # The local submodule may sit on an UNPUSHED commit (e.g. the f2-dfx
+            # nested-DFX branch whose parent is upstream/main). A fresh upstream
+            # clone will not have that hash, so the checkout fails. This is
+            # non-fatal: the rsyncs below overlay every local file, and the
+            # clone's default branch (origin/HEAD == the upstream parent of the
+            # local commit) is the correct base for the excluded common/ip +
+            # shell_stable/hlx. Fall back to it instead of aborting the build.
+            with settings(warn_only=True):
+                checkout_result = run("git checkout " + aws_fpga_upstream_version)
+            if checkout_result.failed:
+                rootLogger.critical(
+                    f"aws-fpga checkout of '{aws_fpga_upstream_version}' failed "
+                    "(likely an unpushed local commit); continuing on the upstream "
+                    "default branch. Local changes are applied via rsync below."
+                )
 
         rsync_cap = rsync_project(
             local_dir=local_awsfpga_dir,
@@ -434,6 +448,18 @@ class F2BitBuilder(BitBuilder):
         if vivado_rc != 0:
             on_build_failure()
             return False
+
+        # Nested-DFX experiment gate (C1): with FIRESIM_SKIP_AFI set, stop after the
+        # build so the routed nested DCP (now rsync'd to results-build) can be verified
+        # (topology / partition pins / DRC / pr_verify) BEFORE any AFI is submitted, per
+        # the pre-AFI gate. Submit is then done manually once the probe passes.
+        if os.environ.get("FIRESIM_SKIP_AFI"):
+            rootLogger.info(
+                "FIRESIM_SKIP_AFI set: skipping aws_create_afi. Build + tarball are in "
+                "results-build; run the pre-AFI probe, then submit manually."
+            )
+            build_farm.release_build_host(self.build_config)
+            return True
 
         if not self.aws_create_afi():
             on_build_failure()

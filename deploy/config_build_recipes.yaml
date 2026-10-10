@@ -59,6 +59,35 @@ firesim_mega_boom:
     metasim_customruntimeconfig: null
     bit_builder_recipe: bit-builder-recipes/f2.yaml
 
+# =============================================================================
+# Nested-DFX experiment (C1): declare the prefetcher as a REAL nested RP inside
+# AWS's WRAPPER/CL (which is itself HD.RECONFIGURABLE), via pr_subdivide.
+#   TARGET_CONFIG = FireSimDfxBestOffsetPrefetchingMegaBoomV3Config -> emits the
+#   STABLE OUTER WRAPPER module `ReconfigurablePrefetcher` (fixed 323-pin PrefetcherIO,
+#   real inner sub-Module) around a BestOffset inner. This is the exact config the
+#   pr_subdivide structural probe passed on and the config of the booting nopr base.
+#   pr_module_name = ReconfigurablePrefetcher (NOT the inner EvolvedPrefetcher/BestOffset).
+#   No pr_base_recipe => PARENT flow: pass1 stock build + pass2 pr_subdivide, then the
+#   nested base DCP is packaged directly to AWS bitgen (build-bitstream.sh parent branch).
+# Goal: empirically test whether AWS create-fpga-image accepts a nested
+#   HD.RECONFIGURABLE_CONTAINER topology and produces a BOOTING AFI.
+dfx_nested_bestoffset_base:
+    PLATFORM: f2
+    TARGET_PROJECT: firesim
+    TARGET_PROJECT_MAKEFRAG: ../../../generators/firechip/chip/src/main/makefrag/firesim
+    DESIGN: FireSim
+    TARGET_CONFIG: FireSimDfxBestOffsetPrefetchingMegaBoomV3Config
+    PLATFORM_CONFIG: DefaultF2Config
+    deploy_quintuplet: null
+    platform_config_args:
+        fpga_frequency: 35
+        build_strategy: TIMING
+        enable_pr: true
+        pr_module_name: ReconfigurablePrefetcher
+    post_build_hook: null
+    metasim_customruntimeconfig: null
+    bit_builder_recipe: bit-builder-recipes/f2.yaml
+
 # Partial reconfiguration pair. The only difference is pr_base_recipe: its
 # presence selects the child (RM swap) flow, its absence the parent (base) flow.
 # Loop: build the base once, edit EvolvedPrefetcher.scala, build the child.

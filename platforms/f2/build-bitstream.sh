@@ -131,7 +131,12 @@ CLOCK_RECIPE_C="C0"
 # aws_build_dcp_from_cl.py defaults clock_recipe_hbm to H2 (:212) and pass 1 does
 # not override it, so anything downstream must use H2 to stay consistent.
 CLOCK_RECIPE_HBM="H2"
-PR_PBLOCK_REGION="${PR_PBLOCK_REGION:-CLOCKREGION_X4Y0:CLOCKREGION_X7Y0}"
+# Candidate nested-RP region: four whole clock regions in lower-left SLR2.
+# The reference parent has no placed DDR or fixed shell cells in this region;
+# placement and routing must still validate the subdivided design. This value
+# is passed explicitly to main_pr_subdivide.tcl below.
+PR_PBLOCK_REGION="${PR_PBLOCK_REGION:-CLOCKREGION_X1Y8:CLOCKREGION_X2Y9}"
+export PR_PBLOCK_REGION
 
 # Match aws_build_dcp_from_cl.py's TIMESTAMP_FILE_FORMAT (:29).
 if [ -z "$BUILD_TAG" ] ; then
@@ -145,11 +150,18 @@ if [ "$ENABLE_PR" != "true" ] ; then
 elif [ -z "$PR_BASE_DCP" ] ; then
 
 # Nested DFX is a two-pass flow (UG909: "step and repeat through hierarchy").
-# Pass 1 is a STOCK build -- pr_subdivide needs a fully routed checkpoint whose
-# CL post-synth netlist still CONTAINS the RM hierarchy, so nothing is withheld.
-echo "PR: parent pass 1/2 -- stock build (RM stays inline)"
+# Synthesize CL static and RM separately, then assemble the populated CL before
+# the stock outer-RP implementation. Preserve the inner interface without
+# declaring a second RP until pr_subdivide runs.
+echo "PR: parent pass 1/2 -- separately synthesized CL static and RM"
+export FIRESIM_PR_ENABLE=1
+export FIRESIM_PR_NESTED_PARENT=1
+export FIRESIM_PR_MODULE_NAME="$PR_MODULE_NAME"
+export FIRESIM_PR_FREQUENCY="$FREQUENCY"
 
 ./aws_build_dcp_from_cl.py -c $CL_NAME --frequency $FREQUENCY --aws_clk_gen --clock_recipe_a $CLOCK_RECIPE_A  --clock_recipe_b $CLOCK_RECIPE_B --clock_recipe_c $CLOCK_RECIPE_C --mode small_shell --tag $BUILD_TAG
+
+unset FIRESIM_PR_ENABLE FIRESIM_PR_NESTED_PARENT FIRESIM_PR_MODULE_NAME FIRESIM_PR_FREQUENCY
 
 # Pass 2: pr_subdivide pushes HD.RECONFIGURABLE from WRAPPER/CL down to the RM,
 # marking WRAPPER/CL as HD.RECONFIGURABLE_CONTAINER, then re-implements.
@@ -159,6 +171,19 @@ vivado -mode batch -source $CL_DIR/build/scripts/main_pr_subdivide.tcl -log ${BU
 
 echo "PR: base checkpoint to reuse for RM swaps:"
 echo "PR:   $CL_DIR/build/checkpoints/${CL_NAME}.${BUILD_TAG}.post_route.dcp"
+
+# Recombine only the AWS export, preserving the nested base for child swaps.
+AWS_EXPORT_DCP="$CL_DIR/build/checkpoints/${CL_NAME}.${BUILD_TAG}.aws_post_route.dcp"
+vivado -mode batch -source "$CL_DIR/build/scripts/main_pr_export.tcl" -log "${BUILD_TAG}.export.vivado.log" -tclargs --base_dcp "$CL_DIR/build/checkpoints/${CL_NAME}.${BUILD_TAG}.post_route.dcp" --output_dcp "$AWS_EXPORT_DCP"
+echo "PR: packaging recombined outer-CL checkpoint for AWS bitgen"
+export BUILD_TAG="$BUILD_TAG"
+python3 - "$CL_NAME" "$BUILD_TAG" "$CLOCK_RECIPE_A" "$CLOCK_RECIPE_B" "$CLOCK_RECIPE_C" "$CLOCK_RECIPE_HBM" "$AWS_EXPORT_DCP" <<'PY'
+import sys
+sys.path.insert(0, '.')
+import aws_build_dcp_from_cl as awsbuild
+awsbuild.generate_dcp_tarball(*sys.argv[1:7], dcp_path=sys.argv[7])
+PY
+echo "PR: outer-CL tarball: $CL_DIR/build/checkpoints/${BUILD_TAG}.Developer_CL.tar"
 
 else
 
@@ -185,12 +210,14 @@ vivado -mode batch -source $CL_DIR/build/scripts/main_pr_rm.tcl -log ${BUILD_TAG
 #    it directly rather than re-running the build; it writes the DCP sha256.
 export SHELL_MODE="small_shell"
 export BUILD_TAG="$BUILD_TAG"
-python3 -c "
+AWS_EXPORT_DCP="$CL_DIR/build/checkpoints/${CL_NAME}.${BUILD_TAG}.aws_post_route.dcp"
+vivado -mode batch -source "$CL_DIR/build/scripts/main_pr_export.tcl" -log "${BUILD_TAG}.export.vivado.log" -tclargs --base_dcp "$CL_DIR/build/checkpoints/${CL_NAME}.${BUILD_TAG}.post_route.dcp" --output_dcp "$AWS_EXPORT_DCP"
+python3 - "$CL_NAME" "$BUILD_TAG" "$CLOCK_RECIPE_A" "$CLOCK_RECIPE_B" "$CLOCK_RECIPE_C" "$CLOCK_RECIPE_HBM" "$AWS_EXPORT_DCP" <<'PY'
 import sys
 sys.path.insert(0, '.')
 import aws_build_dcp_from_cl as awsbuild
-awsbuild.generate_dcp_tarball('$CL_NAME', '$BUILD_TAG', '$CLOCK_RECIPE_A', '$CLOCK_RECIPE_B', '$CLOCK_RECIPE_C', '$CLOCK_RECIPE_HBM')
-"
+awsbuild.generate_dcp_tarball(*sys.argv[1:7], dcp_path=sys.argv[7])
+PY
 
 echo "PR: RM swap complete. Tarball:"
 echo "PR:   $CL_DIR/build/checkpoints/${BUILD_TAG}.Developer_CL.tar"
