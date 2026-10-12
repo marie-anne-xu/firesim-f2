@@ -18,6 +18,7 @@ usage() {
     echo "   --pr_module_name  : Name(s) of the PR module(s), comma-separated if multiple (required if --enable_pr is true)"
     echo "   --pr_partition_path : Hierarchical path(s) to the PR partition(s), comma-separated if multiple (optional; discovered at synthesis if omitted)"
     echo "   --pr_base_dcp     : Path to a base build's post_route.dcp (optional, if specified uses main_pr_rm.tcl instead of the parent flow)"
+    echo "   --pr_region       : Nested RP region for the parent flow, e.g. CLOCKREGION_X1Y8:CLOCKREGION_X1Y8 (default: pr_nested_region in pr_utils.tcl)"
     echo "   --build_tag       : Pin the build tag so parent and child agree on checkpoint names (optional, defaults to a timestamp)"
     echo "   --help      : Display this message"
     exit "$1"
@@ -60,6 +61,9 @@ do
         --pr_base_dcp )
             shift
             PR_BASE_DCP=$1 ;;
+        --pr_region )
+            shift
+            PR_REGION=$1 ;;
         --build_tag )
             shift
             BUILD_TAG=$1 ;;
@@ -158,6 +162,10 @@ export FIRESIM_PR_ENABLE=1
 export FIRESIM_PR_NESTED_PARENT=1
 export FIRESIM_PR_MODULE_NAME="$PR_MODULE_NAME"
 export FIRESIM_PR_FREQUENCY="$FREQUENCY"
+if [ -n "$PR_REGION" ]; then
+    export FIRESIM_PR_NESTED_REGION="$PR_REGION"
+    echo "PR: nested RP region (recipe pr_region): $PR_REGION"
+fi
 
 ./aws_build_dcp_from_cl.py -c $CL_NAME --frequency $FREQUENCY --aws_clk_gen --clock_recipe_a $CLOCK_RECIPE_A  --clock_recipe_b $CLOCK_RECIPE_B --clock_recipe_c $CLOCK_RECIPE_C --mode small_shell --tag $BUILD_TAG
 

@@ -174,6 +174,9 @@ class BuildConfig:
         # pr_base_recipe: name of a previous recipe whose static shell to reuse.
         # The bit builder resolves this to pr_project_path at build time.
         self.pr_base_recipe = bitstream_build_args.get("pr_base_recipe")
+        # pr_region: nested-DFX RP floorplan for the PARENT (base) build, e.g.
+        # "CLOCKREGION_X1Y8:CLOCKREGION_X1Y8" (space-separated ranges allowed). Children inherit the base's.
+        self.pr_region = bitstream_build_args.get("pr_region")
         # pr_partition_module_name: module name(s) used in the original main_pr.tcl build
         # (for partition def lookup). Defaults to pr_module_name if not set.
         pr_partition_module_name_raw = bitstream_build_args.get("pr_partition_module_name")
@@ -298,6 +301,10 @@ class BuildConfig:
             True if PR is enabled, False otherwise
         """
         return self.enable_pr
+
+    def get_pr_region(self) -> Optional[str]:
+        """Nested-DFX RP region for a base build (None = the flow's default)."""
+        return self.pr_region
 
     def get_pr_module_name(self) -> Optional[Union[str, List[str]]]:
         """Get the PR module name(s).

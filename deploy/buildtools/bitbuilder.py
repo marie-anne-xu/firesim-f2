@@ -422,6 +422,8 @@ class F2BitBuilder(BitBuilder):
             # pr_project_path does on U250.
             if pr_base_dcp:
                 build_cmd += f" --pr_base_dcp {pr_base_dcp}"
+            elif self.build_config.get_pr_region():
+                build_cmd += f" --pr_region '{self.build_config.get_pr_region()}'"
 
         with InfoStreamLogger("stdout"), settings(warn_only=True):
             vivado_result = run(build_cmd)
