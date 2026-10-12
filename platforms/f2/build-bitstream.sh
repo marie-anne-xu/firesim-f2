@@ -211,7 +211,8 @@ vivado -mode batch -source $CL_DIR/build/scripts/main_pr_rm.tcl -log ${BUILD_TAG
 export SHELL_MODE="small_shell"
 export BUILD_TAG="$BUILD_TAG"
 AWS_EXPORT_DCP="$CL_DIR/build/checkpoints/${CL_NAME}.${BUILD_TAG}.aws_post_route.dcp"
-vivado -mode batch -source "$CL_DIR/build/scripts/main_pr_export.tcl" -log "${BUILD_TAG}.export.vivado.log" -tclargs --base_dcp "$CL_DIR/build/checkpoints/${CL_NAME}.${BUILD_TAG}.post_route.dcp" --output_dcp "$AWS_EXPORT_DCP"
+# main_pr_rm.tcl now writes the recombined export itself (fused); only fall back.
+[ -f "$AWS_EXPORT_DCP" ] || vivado -mode batch -source "$CL_DIR/build/scripts/main_pr_export.tcl" -log "${BUILD_TAG}.export.vivado.log" -tclargs --base_dcp "$CL_DIR/build/checkpoints/${CL_NAME}.${BUILD_TAG}.post_route.dcp" --output_dcp "$AWS_EXPORT_DCP"
 python3 - "$CL_NAME" "$BUILD_TAG" "$CLOCK_RECIPE_A" "$CLOCK_RECIPE_B" "$CLOCK_RECIPE_C" "$CLOCK_RECIPE_HBM" "$AWS_EXPORT_DCP" <<'PY'
 import sys
 sys.path.insert(0, '.')
