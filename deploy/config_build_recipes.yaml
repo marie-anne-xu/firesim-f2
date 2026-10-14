@@ -60,17 +60,19 @@ firesim_mega_boom:
     bit_builder_recipe: bit-builder-recipes/f2.yaml
 
 # =============================================================================
-# Nested-DFX experiment (C1): declare the prefetcher as a REAL nested RP inside
-# AWS's WRAPPER/CL (which is itself HD.RECONFIGURABLE), via pr_subdivide.
-#   TARGET_CONFIG = FireSimDfxBestOffsetPrefetchingMegaBoomV3Config -> emits the
-#   STABLE OUTER WRAPPER module `ReconfigurablePrefetcher` (fixed 323-pin PrefetcherIO,
-#   real inner sub-Module) around a BestOffset inner. This is the exact config the
-#   pr_subdivide structural probe passed on and the config of the booting nopr base.
-#   pr_module_name = ReconfigurablePrefetcher (NOT the inner EvolvedPrefetcher/BestOffset).
-#   No pr_base_recipe => PARENT flow: pass1 stock build + pass2 pr_subdivide, then the
-#   nested base DCP is packaged directly to AWS bitgen (build-bitstream.sh parent branch).
-# Goal: empirically test whether AWS create-fpga-image accepts a nested
-#   HD.RECONFIGURABLE_CONTAINER topology and produces a BOOTING AFI.
+# Nested-DFX base + child pair (F2). Build the base once, then any number of
+# children; each child swaps only the prefetcher RM into the base's nested DCP.
+#
+# BASE (no pr_base_recipe -> parent flow, ~4.3 h incl. AFI):
+#   pass 1 = flat build with the RP region reserved (MIG calibration BRAM INIT
+#   replay + gates), pass 2 = pr_subdivide -> ReconfigurablePrefetcher becomes a
+#   nested RP inside AWS's WRAPPER/CL. results-build keeps the NESTED post_route.dcp
+#   (the iteration base); AWS gets a pr_recombine'd copy (it rejects nested containers).
+#   TARGET_CONFIG's prefetcher is just the RM the base is built with.
+#   pr_region (optional): RP clock-region rectangle; default CLOCKREGION_X1Y0:X2Y0
+#   (SLR0). Pick one with build/scripts/pr_derive_region.tcl on a placed flat build,
+#   e.g. CLOCKREGION_X1Y8:CLOCKREGION_X2Y8 (SLR2, where the prefetcher naturally sits).
+#   Verified: agfi-09544feff6a5c1939 (SLR0) and agfi-01474bf8bb9f4e8b9 (SLR2) boot Linux.
 dfx_nested_bestoffset_base:
     PLATFORM: f2
     TARGET_PROJECT: firesim
@@ -84,6 +86,32 @@ dfx_nested_bestoffset_base:
         build_strategy: TIMING
         enable_pr: true
         pr_module_name: ReconfigurablePrefetcher
+        # pr_region: CLOCKREGION_X1Y8:CLOCKREGION_X2Y8
+    post_build_hook: null
+    metasim_customruntimeconfig: null
+    bit_builder_recipe: bit-builder-recipes/f2.yaml
+
+# CHILD (pr_base_recipe -> RM swap on the base's latest results-build nested DCP,
+# ~2 h incl. AFI): elaborates TARGET_CONFIG, OOC-synthesizes only the RM, then
+# main_pr_rm.tcl swaps it in (static locked), recombines and pr_verifies against the
+# AWS shell. Everything except the prefetcher must match the base (same wrapper,
+# bridges, tweaks, frequency). Verified: agfi-076a9d1e9f68721a0 boots Linux.
+# Build the base with the CURRENT scripts first: an older dfx_nested_bestoffset_base
+# results-build has an empty DDR calibration BRAM and the child's MIG gate stops it.
+dfx_nested_ampm_child:
+    PLATFORM: f2
+    TARGET_PROJECT: firesim
+    TARGET_PROJECT_MAKEFRAG: ../../../generators/firechip/chip/src/main/makefrag/firesim
+    DESIGN: FireSim
+    TARGET_CONFIG: FireSimDfxAMPMPrefetchingMegaBoomV3Config
+    PLATFORM_CONFIG: DefaultF2Config
+    deploy_quintuplet: null
+    platform_config_args:
+        fpga_frequency: 35
+        build_strategy: TIMING
+        enable_pr: true
+        pr_module_name: ReconfigurablePrefetcher
+        pr_base_recipe: dfx_nested_bestoffset_base
     post_build_hook: null
     metasim_customruntimeconfig: null
     bit_builder_recipe: bit-builder-recipes/f2.yaml
