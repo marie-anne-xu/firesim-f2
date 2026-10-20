@@ -422,6 +422,8 @@ class F2BitBuilder(BitBuilder):
             # pr_project_path does on U250.
             if pr_base_dcp:
                 build_cmd += f" --pr_base_dcp {pr_base_dcp}"
+                if self.build_config.get_pr_rapidwright():
+                    build_cmd += " --pr_rapidwright"
             elif self.build_config.get_pr_region():
                 build_cmd += f" --pr_region '{self.build_config.get_pr_region()}'"
 
