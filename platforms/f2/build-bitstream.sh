@@ -19,7 +19,6 @@ usage() {
     echo "   --pr_partition_path : Hierarchical path(s) to the PR partition(s), comma-separated if multiple (optional; discovered at synthesis if omitted)"
     echo "   --pr_base_dcp     : Path to a base build's post_route.dcp (optional, if specified uses main_pr_rm.tcl instead of the parent flow)"
     echo "   --pr_region       : Nested RP region for the parent flow, e.g. CLOCKREGION_X1Y8:CLOCKREGION_X1Y8 (default: pr_nested_region in pr_utils.tcl)"
-    echo "   --pr_rapidwright  : Child flow: route the RM with RapidWright (scripts/rw) instead of in-place P&R"
     echo "   --build_tag       : Pin the build tag so parent and child agree on checkpoint names (optional, defaults to a timestamp)"
     echo "   --help      : Display this message"
     exit "$1"
@@ -65,8 +64,6 @@ do
         --pr_region )
             shift
             PR_REGION=$1 ;;
-        --pr_rapidwright )
-            PR_RAPIDWRIGHT=1 ;;
         --build_tag )
             shift
             BUILD_TAG=$1 ;;
@@ -215,14 +212,11 @@ if [ -n "$PR_PARTITION_PATH" ] ; then
     PR_PATH_ARG="--pr_partition_path $PR_PARTITION_PATH"
 fi
 
-RW_ARG=""
-if [ -n "$PR_RAPIDWRIGHT" ] ; then
-    RW_BASE_DIR="$CL_DIR/build/checkpoints/rw_base"
-    vivado -mode batch -source $CL_DIR/build/scripts/rw/main_pr_rwfst_base.tcl -log ${BUILD_TAG}.rw_base.vivado.log -tclargs --base_dcp "$PR_BASE_DCP" --out_dir "$RW_BASE_DIR"
-    RW_ARG="--rw_base_dir $RW_BASE_DIR"
-fi
+# RapidWright routes the RM (scripts/rw); per-base inputs first.
+RW_BASE_DIR="$CL_DIR/build/checkpoints/rw_base"
+vivado -mode batch -source $CL_DIR/build/scripts/rw/main_pr_rwfst_base.tcl -log ${BUILD_TAG}.rw_base.vivado.log -tclargs --base_dcp "$PR_BASE_DCP" --out_dir "$RW_BASE_DIR"
 
-vivado -mode batch -source $CL_DIR/build/scripts/main_pr_rm.tcl -log ${BUILD_TAG}.rm_swap.vivado.log -tclargs --cl_dir "$CL_DIR" --build_tag "$BUILD_TAG" --cl_name "$CL_NAME" --base_dcp "$PR_BASE_DCP" --rm_dcp "$RM_DCP" $PR_PATH_ARG $RW_ARG
+vivado -mode batch -source $CL_DIR/build/scripts/main_pr_rm.tcl -log ${BUILD_TAG}.rm_swap.vivado.log -tclargs --cl_dir "$CL_DIR" --build_tag "$BUILD_TAG" --cl_name "$CL_NAME" --base_dcp "$PR_BASE_DCP" --rm_dcp "$RM_DCP" $PR_PATH_ARG --rw_base_dir "$RW_BASE_DIR"
 
 # 3. Package. generate_dcp_tarball is gated on flow == BuildAll (:349), so call
 #    it directly rather than re-running the build; it writes the DCP sha256.

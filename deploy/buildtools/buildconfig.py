@@ -177,8 +177,6 @@ class BuildConfig:
         # pr_region: nested-DFX RP floorplan for the PARENT (base) build, e.g.
         # "CLOCKREGION_X1Y8:CLOCKREGION_X1Y8" (space-separated ranges allowed). Children inherit the base's.
         self.pr_region = bitstream_build_args.get("pr_region")
-        # pr_rapidwright: child build routes the RM with RapidWright (scripts/rw) instead of in-place P&R.
-        self.pr_rapidwright = bitstream_build_args.get("pr_rapidwright", False)
         # pr_partition_module_name: module name(s) used in the original main_pr.tcl build
         # (for partition def lookup). Defaults to pr_module_name if not set.
         pr_partition_module_name_raw = bitstream_build_args.get("pr_partition_module_name")
@@ -307,10 +305,6 @@ class BuildConfig:
     def get_pr_region(self) -> Optional[str]:
         """Nested-DFX RP region for a base build (None = the flow's default)."""
         return self.pr_region
-
-    def get_pr_rapidwright(self) -> bool:
-        """Child build: RapidWright RM routing (main_pr_rm.tcl --rw_base_dir)."""
-        return self.pr_rapidwright
 
     def get_pr_module_name(self) -> Optional[Union[str, List[str]]]:
         """Get the PR module name(s).

@@ -116,25 +116,6 @@ dfx_nested_ampm_child:
     metasim_customruntimeconfig: null
     bit_builder_recipe: bit-builder-recipes/f2.yaml
 
-dfx_nested_ampm_child_rw:
-    PLATFORM: f2
-    TARGET_PROJECT: firesim
-    TARGET_PROJECT_MAKEFRAG: ../../../generators/firechip/chip/src/main/makefrag/firesim
-    DESIGN: FireSim
-    TARGET_CONFIG: FireSimDfxAMPMPrefetchingMegaBoomV3Config
-    PLATFORM_CONFIG: DefaultF2Config
-    deploy_quintuplet: null
-    platform_config_args:
-        fpga_frequency: 35
-        build_strategy: TIMING
-        enable_pr: true
-        pr_module_name: ReconfigurablePrefetcher
-        pr_base_recipe: dfx_nested_bestoffset_base
-        pr_rapidwright: true
-    post_build_hook: null
-    metasim_customruntimeconfig: null
-    bit_builder_recipe: bit-builder-recipes/f2.yaml
-
 # Partial reconfiguration pair. The only difference is pr_base_recipe: its
 # presence selects the child (RM swap) flow, its absence the parent (base) flow.
 # Loop: build the base once, edit EvolvedPrefetcher.scala, build the child.
