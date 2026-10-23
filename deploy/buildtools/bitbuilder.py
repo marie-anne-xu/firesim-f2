@@ -238,13 +238,8 @@ class F2BitBuilder(BitBuilder):
         with prefix("cd " + dest_f2_platform_dir):
             run("git clone https://github.com/firesim/aws-fpga-firesim-f2.git")
         with prefix("cd " + dest_awsfpga_dir):
-            # The local submodule may sit on an UNPUSHED commit (e.g. the f2-dfx
-            # nested-DFX branch whose parent is upstream/main). A fresh upstream
-            # clone will not have that hash, so the checkout fails. This is
-            # non-fatal: the rsyncs below overlay every local file, and the
-            # clone's default branch (origin/HEAD == the upstream parent of the
-            # local commit) is the correct base for the excluded common/ip +
-            # shell_stable/hlx. Fall back to it instead of aborting the build.
+            # An unpushed local commit can't be checked out from upstream; the default
+            # branch is fine as the rsyncs below overlay every local file.
             with settings(warn_only=True):
                 checkout_result = run("git checkout " + aws_fpga_upstream_version)
             if checkout_result.failed:
@@ -350,8 +345,7 @@ class F2BitBuilder(BitBuilder):
         pr_base_dcp = self.build_config.get_pr_project_path()
         pr_base_recipe = self.build_config.get_pr_base_recipe()
 
-        # Resolve pr_base_recipe -> base routed DCP. Non-project mode needs only a
-        # checkpoint, so unlike U250 there is no base_project copy to make.
+        # Resolve pr_base_recipe to the base build's routed DCP.
         if enable_pr and pr_base_recipe and not pr_base_dcp:
             all_recipes = self.build_config.build_config_file.all_build_recipes
             if pr_base_recipe not in all_recipes:
@@ -418,8 +412,7 @@ class F2BitBuilder(BitBuilder):
                     build_cmd += f" --pr_partition_path {','.join(pr_partition_path)}"
                 else:
                     build_cmd += f" --pr_partition_path {pr_partition_path}"
-            # Presence of the base DCP selects the child (RM swap) flow, the way
-            # pr_project_path does on U250.
+            # A base DCP selects the child (RM swap) flow.
             if pr_base_dcp:
                 build_cmd += f" --pr_base_dcp {pr_base_dcp}"
             elif self.build_config.get_pr_region():
@@ -451,10 +444,7 @@ class F2BitBuilder(BitBuilder):
             on_build_failure()
             return False
 
-        # Nested-DFX experiment gate (C1): with FIRESIM_SKIP_AFI set, stop after the
-        # build so the routed nested DCP (now rsync'd to results-build) can be verified
-        # (topology / partition pins / DRC / pr_verify) BEFORE any AFI is submitted, per
-        # the pre-AFI gate. Submit is then done manually once the probe passes.
+        # FIRESIM_SKIP_AFI: stop after the build to check the DCP before submitting an AFI.
         if os.environ.get("FIRESIM_SKIP_AFI"):
             rootLogger.info(
                 "FIRESIM_SKIP_AFI set: skipping aws_create_afi. Build + tarball are in "
