@@ -1,6 +1,6 @@
 # RapidWright shell flow for F2 prefetcher swaps (branch `rapidwright-scratch`)
 
-Status: WORKS END TO END. Base and AMPM child built with this flow boot Linux on F2. Branch
+Status: WORKS END TO END. Base and two children (AMPM, Evolved) built with this flow boot Linux on F2. Branch
 `rapidwright-scratch` in both repos (from f2-dfx-chia: aws-fpga 946592f, firesim 16302757), committed on
 the clone (i-089449788af2c0145) and fetched to the manager as local branches. Not pushed.
 
@@ -18,6 +18,10 @@ implements that, replacing our Vivado nested DFX (pr_subdivide / pr_recombine / 
 | 4. `rapidwright MakeBlackBox routed.dcp shell.dcp <cell>` | child `main_pr_rm.tcl`: run on the `firesim_top` cell checkpoint (+ its EDIF); its shell's PROHIBITs (half-used SLICE BELs) are extracted |
 | 5. open shell, lock_design -level routing | child: full base opened; Vivado black-boxes the prefetcher (HD.PARTITION set on it), locks routing, reads the shell's PROHIBITs |
 | 6. read_checkpoint -cell, waive REQP-1753, place, route | child: same, then AWS check_ddr_bram, timing/route gates, AWS tarball |
+
+In the tutorial itself only step 4 runs in RapidWright; steps 2, 3, 5 and 6 (implement, OOC synth,
+open shell + `lock_design -level routing`, `read_checkpoint -cell` + `place_design` + `route_design`)
+are Vivado commands. This flow keeps that split; the only deviation is inside step 4/5 below.
 
 Why the split: RapidWright needs a readable netlist. The F2 design (AWS top: `EDIF 20-92`) and
 `WRAPPER/CL` (`Designutils 20-2284`, IEEE 1735 V2 sh_ddr helpers) can't be exported; `firesim_top` can,
@@ -61,9 +65,11 @@ DDR calibration ELF: the base synthesizes the real prefetcher (no stub/black box
 |---|---|---|---|---|---|
 | `dfx_rws_base` (BestOffset) | 195 min (01:55 -> 05:10) | agfi-078c194afc723e2ae | Memdata 28-144 (ELF loaded by synth), check_ddr_bram initialized, WNS 0.138 / WHS 0.010, 0 ERROR | pass | `buildroot login:` |
 | `dfx_rws_ampm` (AMPM child) | 126 min (05:10 -> 07:16) | agfi-0649d28aa33f9f15a | fully routed, WNS 0.138 / WHS 0.010, check_ddr_bram initialized, 0 ERROR, AWS ingest OK | pass | `buildroot login:` |
+| `dfx_rws_evolved` (Evolved child, same base) | 133 min (07:28 -> 09:41) | agfi-031c5f6961ee9015e | fully routed, WNS 0.138 / WHS 0.010, check_ddr_bram initialized, 0 ERROR, AWS ingest OK | pass | `buildroot login:` |
 
-Child time split: RTL reused, host 3.5 min, RM synth 4 min, swap 70.4 min, AWS AFI ~48 min.
-Swap step (s): open base 131, firesim_top cell DCP 60 + EDIF 11, RapidWright install 38 (fresh host),
+Child time split (AMPM): RTL reused, host 3.5 min, RM synth 4 min, swap 70.4 min, AWS AFI ~48 min.
+Evolved: swap 70.8 min (read_checkpoint -cell 11.1, place 35.5, route 11.5 min), AWS AFI ~54 min.
+AMPM swap step (s): open base 131, firesim_top cell DCP 60 + EDIF 11, RapidWright install 38 (fresh host),
 MakeBlackBox 33, black box 82, lock 52, PROHIBITs 206, read_checkpoint -cell 661, place 2101, route 716,
 write 67. Only CRITICAL WARNING: Vivado 12-4430 for the tutorial's REQP-1753 waiver.
 
@@ -73,5 +79,13 @@ Vivado's full-design placer setup with 1.8M PROHIBITs; not tuned yet.
 
 ## Open issues
 - Child place 35 min / read_checkpoint -cell 11 min: not tuned (e.g. place directive, PROHIBIT count).
-- Only AMPM tested as a child; other prefetchers untested.
 - The clone manager on m8i.4xlarge lost build-host ssh sessions 3 times; c5.4xlarge did not.
+
+## Commits (branch `rapidwright-scratch`, not pushed)
+- aws-fpga-firesim-f2 `13300df`: flow (base DONT_TOUCH, RapidWright shell child), nested-DFX removal, AWS files to upstream.
+- firesim `45f1d91b`: build-bitstream.sh base/child, drop pr_region, gitlink 13300df, this report (platforms/f2/RAPIDWRIGHT_DFX.md).
+- firesim (next commit): report update (Evolved result, final sections).
+- Fetched to the manager as local branches `rapidwright-scratch` (no worktree touched).
+
+## Instances
+Clone i-089449788af2c0145 stopped (c5.4xlarge); all build/run hosts terminated by FireSim.
