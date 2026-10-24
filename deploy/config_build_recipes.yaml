@@ -59,9 +59,8 @@ firesim_mega_boom:
     metasim_customruntimeconfig: null
     bit_builder_recipe: bit-builder-recipes/f2.yaml
 
-# F2 nested-DFX pair: build the base once; each child swaps only the prefetcher RM into it.
-# Base (no pr_base_recipe): pr_region (optional) picks the RP clock regions (build/scripts/pr_derive_region.tcl
-# suggests one), default SLR0 X1Y0:X2Y0.
+# F2 prefetcher-swap pair (RapidWright "Reuse Timing-closed Logic As A Shell" flow): build the base once;
+# each child (pr_base_recipe set) re-implements only the prefetcher in the locked base.
 dfx_nested_bestoffset_base:
     PLATFORM: f2
     TARGET_PROJECT: firesim
@@ -75,7 +74,6 @@ dfx_nested_bestoffset_base:
         build_strategy: TIMING
         enable_pr: true
         pr_module_name: ReconfigurablePrefetcher
-        # pr_region: CLOCKREGION_X1Y8:CLOCKREGION_X2Y8
     post_build_hook: null
     metasim_customruntimeconfig: null
     bit_builder_recipe: bit-builder-recipes/f2.yaml
