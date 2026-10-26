@@ -13,6 +13,7 @@ import chisel3.{
   MemBase,
   Module,
   Printable,
+  RawModule,
   RegNext,
   Reset,
   UInt,
@@ -20,7 +21,8 @@ import chisel3.{
   WireDefault,
 }
 import chisel3.printf.Printf
-import chisel3.experimental.{annotate, requireIsHardware, BaseModule, ChiselAnnotation}
+import chisel3.experimental.{annotate, doNotDedup, requireIsHardware, BaseModule, ChiselAnnotation}
+import chisel3.reflect.DataMirror
 import firrtl.RenameMap
 import firrtl.annotations.{
   Annotation,
@@ -194,6 +196,39 @@ case class FirrtlExcludeFromMultiThreadingAnnotation(
     with FAMEAnnotation {
   def targets = Seq(target)
   def duplicate(n: InstanceTarget) = this.copy(n)
+}
+
+/** This labels an instance as a DFX reconfigurable-partition boundary (Chisel annotator).
+  */
+case class ReconfigurablePartitionAnnotation(target: BaseModule) extends ChiselAnnotation {
+  def toFirrtl: FirrtlReconfigurablePartitionAnnotation = {
+    val parent = ModuleTarget(target.toNamed.circuit.name, target.parentModName)
+    FirrtlReconfigurablePartitionAnnotation(parent.instOf(target.instanceName, target.name))
+  }
+}
+
+/** This labels an instance as a DFX reconfigurable-partition boundary (FIRRTL annotation). Golden Gate checks that the
+  * boundary survives compilation unchanged and reports its final instance path.
+  */
+case class FirrtlReconfigurablePartitionAnnotation(
+  target: InstanceTarget
+) extends SingleTargetAnnotation[InstanceTarget] {
+  def targets = Seq(target)
+  def duplicate(n: InstanceTarget) = this.copy(n)
+}
+
+object ReconfigurablePartition {
+
+  /** Marks `module` as a reconfigurable-partition boundary. Call from the parent, after `Module(...)`. Its ports are
+    * kept exactly as written (dontTouch) and its module is not deduplicated, so the Verilog and Vivado boundaries
+    * match the Chisel one.
+    */
+  def apply[T <: RawModule](module: T): T = {
+    DataMirror.modulePorts(module).foreach { case (_, port) => dontTouch(port) }
+    doNotDedup(module)
+    annotate(ReconfigurablePartitionAnnotation(module))
+    module
+  }
 }
 
 /** This labels a target Mem so that it is extracted and replaced with a separate model.

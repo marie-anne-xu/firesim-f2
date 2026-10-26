@@ -3,7 +3,7 @@
 package midas.stage
 
 import midas.{HostTransforms, TargetTransforms}
-import midas.passes.MidasTransforms
+import midas.passes.{MidasTransforms, ReconfigurablePartitionBoundaries}
 import midas.stage.phases.{ConfigParametersAnnotation, CreateParametersInstancePhase}
 
 import firrtl.{AnnotationSeq, CircuitState}
@@ -32,7 +32,11 @@ class GoldenGateCompilerPhase extends Phase {
       firrtl.passes.memlib.PassthroughSimpleSyncReadMemsAnnotation,
     )
 
-    val state = CircuitState(allCircuits.head, firrtl.ChirrtlForm, annotations ++ midasAnnos)
+    val inputState = CircuitState(allCircuits.head, firrtl.ChirrtlForm, annotations ++ midasAnnos)
+
+    // Hash manifest of the CHIRRTL as read, before any lowering (only when the design marks reconfigurable partitions)
+    val (manifestAnnos, partitionHashes) = ReconfigurablePartitionBoundaries.manifest(inputState)
+    val state                            = inputState.copy(annotations = inputState.annotations ++ manifestAnnos)
 
     // Lower the target design and run additional target transformations before Golden Gate xforms
     val targetLoweringCompiler = new Compiler(
@@ -47,7 +51,9 @@ class GoldenGateCompilerPhase extends Phase {
     )
     logger.info("Pre-GG Target Transformation Ordering\n")
     logger.info(targetLoweringCompiler.prettyPrint("  "))
-    val loweredTarget          = targetLoweringCompiler.execute(state)
+    // Record each reconfigurable partition's port list before Golden Gate's optimizations can change it
+    val loweredTarget          =
+      ReconfigurablePartitionBoundaries.recordPorts(targetLoweringCompiler.execute(state), partitionHashes)
 
     // Run Golden Gate transformations, introducing host-decoupling and generating additional simulator RTL
     val simulator =
@@ -88,7 +94,14 @@ class GoldenGateCompilerPhase extends Phase {
     // Workaround under-constrained transform dependencies by forcing the
     // emitter to run last in a separate compiler.
     val emitter =
-      new Compiler(Seq(Dependency(midas.passes.WriteXDCFile), Dependency[firrtl.SystemVerilogEmitter]), Forms.LowForm)
+      new Compiler(
+        Seq(
+          Dependency(midas.passes.ReconfigurablePartitionBoundaries),
+          Dependency(midas.passes.WriteXDCFile),
+          Dependency[firrtl.SystemVerilogEmitter],
+        ),
+        Forms.LowForm,
+      )
     logger.info("Final Emission Transformation Ordering\n")
     logger.info(emitter.prettyPrint("  "))
 
