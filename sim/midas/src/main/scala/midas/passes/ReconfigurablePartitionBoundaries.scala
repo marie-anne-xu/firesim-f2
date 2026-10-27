@@ -10,6 +10,7 @@ import firrtl._
 import firrtl.ir._
 import firrtl.annotations._
 import firrtl.analyses.InstanceKeyGraph
+import firrtl.transforms.DontTouchAnnotation
 import firrtl.options.Dependency
 import firrtl.stage.Forms
 
@@ -196,6 +197,19 @@ object ReconfigurablePartitionHashManifest {
   }
 }
 
+/** The hash manifest of a CHIRRTL file without running Golden Gate, so a build can choose its partition first.
+  * usage: ReconfigurablePartitionHashManifestMain <input.fir> <output.json>
+  */
+object ReconfigurablePartitionHashManifestMain {
+  def main(args: Array[String]): Unit = {
+    require(args.length == 2, "usage: ReconfigurablePartitionHashManifestMain <input.fir> <output.json>")
+    val (json, _) = ReconfigurablePartitionHashManifest(Parser.parseFile(args(0), Parser.UseInfo))
+    val out       = new java.io.PrintWriter(args(1))
+    try out.write(json)
+    finally out.close()
+  }
+}
+
 /** Checks that every reconfigurable partition (see midas.targetutils.ReconfigurablePartition) reaches the emitted
   * Verilog with the boundary it had after target lowering, reports its final path, and tells Vivado to keep it.
   *   - error: partition removed or inlined, or ports added, removed or resized;
@@ -211,12 +225,21 @@ object ReconfigurablePartitionBoundaries extends Transform with DependencyAPIMig
     ReconfigurablePartitionPort(p.name, if (p.direction == Input) "in" else "out", firrtl.bitWidth(p.tpe))
   }
 
-  /** At Golden Gate's input (CHIRRTL): the hash manifest, written only when the design marks a partition. */
+  /** At Golden Gate's input (CHIRRTL): the hash manifest, written only when the design marks a partition, and
+    * dontTouch on every partition port (a partition marked from an annotation file has no Chisel-side dontTouch).
+    */
   def manifest(state: CircuitState): (Seq[Annotation], Map[String, String]) = {
-    if (!state.annotations.exists(_.isInstanceOf[FirrtlReconfigurablePartitionAnnotation])) (Nil, Map.empty)
+    val parts = state.annotations.collect { case a: FirrtlReconfigurablePartitionAnnotation => a }
+    if (parts.isEmpty) (Nil, Map.empty)
     else {
       val (json, fullOf) = ReconfigurablePartitionHashManifest(state.circuit)
-      (Seq(GoldenGateOutputFileAnnotation(json, ".hash-manifest.json")), fullOf)
+      val mods           = state.circuit.modules.map(m => m.name -> m).toMap
+      val keep           = parts.flatMap { a =>
+        mods.get(a.target.ofModule).toSeq.flatMap(_.ports).map { p =>
+          DontTouchAnnotation(ReferenceTarget(state.circuit.main, a.target.ofModule, Nil, p.name, Nil))
+        }
+      }
+      (GoldenGateOutputFileAnnotation(json, ".hash-manifest.json") +: keep, fullOf)
     }
   }
 

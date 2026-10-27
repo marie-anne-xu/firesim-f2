@@ -1,6 +1,7 @@
 from __future__ import with_statement, annotations
 
 import abc
+import glob
 import yaml
 import json
 import time
@@ -13,6 +14,7 @@ from fabric.contrib.console import confirm  # type: ignore
 from fabric.contrib.project import rsync_project  # type: ignore
 
 from util.streamlogger import InfoStreamLogger
+from buildtools import pr_auto
 from util.export import create_export_string
 from awstools.afitools import firesim_tags_to_description, copy_afi_to_all_regions
 from awstools.awstools import (
@@ -74,7 +76,10 @@ class BitBuilder(metaclass=abc.ABCMeta):
         rootLogger.info(
             f"Building Verilog for {self.build_config.get_chisel_quintuplet()}"
         )
+        self.sim_make("replace-rtl")
 
+    def sim_make(self, recipe: str) -> None:
+        """Run a make recipe in sim/ for this build config on the manager host."""
         deploy_dir = get_deploy_dir()
         with InfoStreamLogger("stdout"), prefix(f"cd {deploy_dir}/../"), prefix(
             create_export_string({"RISCV", "PATH", "LD_LIBRARY_PATH"})
@@ -83,7 +88,7 @@ class BitBuilder(metaclass=abc.ABCMeta):
         ), prefix(
             "cd sim/"
         ):
-            run(self.build_config.make_recipe("replace-rtl", deploy_dir))
+            run(self.build_config.make_recipe(recipe, deploy_dir))
 
     def build_driver(self) -> None:
         """Build FireSim FPGA driver from build config. Should run on the manager host."""
@@ -181,6 +186,28 @@ class F2BitBuilder(BitBuilder):
     def __init__(self, build_config: BuildConfig, args: Dict[str, Any]) -> None:
         super().__init__(build_config, args)
         self._parse_args()
+        # Automatic PR (enable_pr alone): the plan replace_rtl picks, see buildtools/pr_auto.py.
+        self.pr_plan: Optional[Dict[str, Any]] = None
+
+    def replace_rtl(self) -> None:
+        """Generate Verilog; with automatic PR, first pick the partition from the RTL change."""
+        if not self.build_config.get_pr_auto():
+            return super().replace_rtl()
+
+        rootLogger.info(
+            f"Building Verilog for {self.build_config.get_chisel_quintuplet()} (automatic PR)"
+        )
+        deploy_dir = get_deploy_dir()
+        gen_dir = f"{deploy_dir}/../sim/generated-src/{self.build_config.PLATFORM}/{self.build_config.get_chisel_quintuplet()}"
+        self.sim_make("hash-manifest")
+        self.pr_manifest = f"{gen_dir}/FireSim-generated.input.hash-manifest.json"
+        self.pr_plan = pr_auto.plan(self.pr_manifest, f"{deploy_dir}/results-build")
+        rootLogger.info(f"Automatic PR: {self.pr_plan['role']} build: {self.pr_plan['reason']}")
+        # Rewritten every build, so Golden Gate always reruns with the current plan.
+        anno_file = f"{gen_dir}/pr_auto.anno.json"
+        with open(anno_file, "w") as f:
+            json.dump(pr_auto.annotations(self.pr_plan), f, indent=1)
+        self.sim_make(f"GOLDENGATE_EXTRA_ANNO_FILE={anno_file} replace-rtl")
 
     def _parse_args(self) -> None:
         """Parse bitbuilder arguments."""
@@ -344,6 +371,16 @@ class F2BitBuilder(BitBuilder):
         pr_partition_path = self.build_config.get_pr_partition_path()
         pr_base_dcp = self.build_config.get_pr_project_path()
         pr_base_recipe = self.build_config.get_pr_base_recipe()
+        if self.pr_plan is not None:
+            # Automatic PR: replace_rtl's plan gives the RP module (base, child) and the base build (child).
+            enable_pr = self.pr_plan["role"] != "flat"
+            pr_module_name = [self.pr_plan["rp_module"]] if enable_pr else None
+
+        # The base build's CL directory in results-build (child builds only).
+        base_cl_dir = None
+        if self.pr_plan is not None and self.pr_plan["role"] == "child":
+            base_cl_dir = sorted(glob.glob(f"{self.pr_plan['base_dir']}/cl_*"))[-1]
+            rootLogger.info(f"Automatic PR: child of base {base_cl_dir}")
 
         # Resolve pr_base_recipe to the base build's routed DCP.
         if enable_pr and pr_base_recipe and not pr_base_dcp:
@@ -372,6 +409,7 @@ class F2BitBuilder(BitBuilder):
                 )
             base_cl_dir = f"{str(find_result).strip()}/cl_{base_quintuplet}"
 
+        if base_cl_dir is not None:
             # "*.post_route.dcp" deliberately excludes "*.post_route.VIOLATED.dcp".
             with settings(warn_only=True):
                 dcp_result = local(
@@ -380,13 +418,13 @@ class F2BitBuilder(BitBuilder):
                 )
             if dcp_result.return_code != 0 or not str(dcp_result).strip():
                 raise Exception(
-                    f"No post_route.dcp in {base_cl_dir}/build/checkpoints/ for base recipe "
-                    f"'{pr_base_recipe}'. If only a *.post_route.VIOLATED.dcp is present, that "
+                    f"No post_route.dcp in {base_cl_dir}/build/checkpoints/ for base "
+                    f"'{pr_base_recipe or base_cl_dir}'. If only a *.post_route.VIOLATED.dcp is present, that "
                     f"base build failed timing and must not be used as a PR base."
                 )
             local_base_dcp = str(dcp_result).strip()
             rootLogger.info(
-                f"Resolved pr_base_recipe '{pr_base_recipe}' -> {local_base_dcp}"
+                f"Resolved PR base '{pr_base_recipe or base_cl_dir}' -> {local_base_dcp}"
             )
 
             # Ship it to the build host; the base results live on the manager.
@@ -456,6 +494,10 @@ class F2BitBuilder(BitBuilder):
         if not self.aws_create_afi():
             on_build_failure()
             return False
+
+        if self.pr_plan is not None:
+            # Later automatic-PR builds compare against this one (and use it as their base if it is one).
+            pr_auto.record(self.pr_plan, self.pr_manifest, local_results_dir)
 
         build_farm.release_build_host(self.build_config)
 

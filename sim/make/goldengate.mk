@@ -22,11 +22,13 @@ compile: $(simulator_verilog)
 # Disable FIRRTL 1.4 deduplication because it creates multiple failures
 # Run the 1.3 version instead (checked-in). If dedup must be completely disabled,
 # pass --no-legacy-dedup as well
-$(simulator_verilog) $(simulator_xdc) $(header) $(fame_annos) &: $(FIRRTL_FILE) $(ANNO_FILE) $(FIRESIM_MAIN_CP)
+# GOLDENGATE_EXTRA_ANNO_FILE: optional extra annotations (F2 automatic partial reconfiguration marks its partition)
+$(simulator_verilog) $(simulator_xdc) $(header) $(fame_annos) &: $(FIRRTL_FILE) $(ANNO_FILE) $(FIRESIM_MAIN_CP) $(GOLDENGATE_EXTRA_ANNO_FILE)
 	$(call run_jar_scala_main,$(firesim_base_dir),$(FIRESIM_MAIN_CP),midas.stage.GoldenGateMain,\
 		-i $(FIRRTL_FILE) \
 		-td $(GENERATED_DIR) \
 		-faf $(ANNO_FILE) \
+		$(if $(GOLDENGATE_EXTRA_ANNO_FILE),-faf $(GOLDENGATE_EXTRA_ANNO_FILE)) \
 		-ggcp $(PLATFORM_CONFIG_PACKAGE) \
 		-ggcs $(PLATFORM_CONFIG) \
 		--output-filename-base $(BASE_FILE_NAME) \
@@ -34,6 +36,14 @@ $(simulator_verilog) $(simulator_xdc) $(header) $(fame_annos) &: $(FIRRTL_FILE) 
 		--no-dedup)
 	grep -sh ^ $(GENERATED_DIR)/firrtl_black_box_resource_files.f | \
 		xargs cat >> $(simulator_verilog) # Append blackboxes to FPGA wrapper, if any
+
+# Hash manifest of the target CHIRRTL without running Golden Gate (F2 automatic partial reconfiguration)
+hash_manifest := $(GENERATED_DIR)/$(BASE_FILE_NAME).input.hash-manifest.json
+.PHONY: hash-manifest
+hash-manifest: $(hash_manifest)
+$(hash_manifest): $(FIRRTL_FILE) $(FIRESIM_MAIN_CP)
+	$(call run_jar_scala_main,$(firesim_base_dir),$(FIRESIM_MAIN_CP),midas.passes.ReconfigurablePartitionHashManifestMain,\
+		$(FIRRTL_FILE) $@)
 
 ####################################
 # Split Verilog into Module Files  #

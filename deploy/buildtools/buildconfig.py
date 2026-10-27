@@ -64,7 +64,9 @@ class BuildConfig:
         PLATFORM_CONFIG: Platform config to build.
         fpga_frequency: Frequency for the FPGA build.
         strategy: Strategy for the FPGA build.
-        enable_pr: Whether to enable Partial Reconfiguration.
+        enable_pr: Whether to enable Partial Reconfiguration. Alone (no other pr_* knob) on F2, the build picks the
+            partition and base from the RTL change (buildtools/pr_auto.py).
+        pr_auto: enable_pr with no partition or base given.
         pr_module_name: Name(s) of the PR (Partial Reconfiguration) module(s). Can be a string or list of strings.
         pr_partition_path: Hierarchical path(s) to the PR partition(s). Optional for main_pr.tcl (paths discovered from design); required for main_pr_rm.tcl.
         pr_project_path: Path to a previous .xpr project file. If specified, uses main_pr_rm.tcl instead of main_pr.tcl.
@@ -84,6 +86,7 @@ class BuildConfig:
     frequency: float
     strategy: BuildStrategy
     enable_pr: bool
+    pr_auto: bool
     pr_module_name: Optional[Union[str, List[str]]]
     pr_partition_path: Optional[Union[str, List[str]]]
     pr_project_path: Optional[str]
@@ -194,7 +197,12 @@ class BuildConfig:
         self.pr_partition_path = _to_str_list(pr_partition_path_raw, "pr_partition_path")
         self.pr_partition_module_name = _to_str_list(pr_partition_module_name_raw, "pr_partition_module_name")
 
-        if self.enable_pr:
+        # enable_pr alone (F2): the build picks the partition from the RTL change (buildtools/pr_auto.py).
+        self.pr_auto = (
+            self.enable_pr and self.pr_module_name is None and self.pr_partition_path is None
+            and self.pr_project_path is None and self.pr_base_recipe is None
+        )
+        if self.enable_pr and not self.pr_auto:
             if self.pr_module_name is None:
                 raise Exception("pr_module_name must be specified when enable_pr is true")
             if self.pr_partition_path is not None and len(self.pr_module_name) != len(self.pr_partition_path):
@@ -300,6 +308,10 @@ class BuildConfig:
             True if PR is enabled, False otherwise
         """
         return self.enable_pr
+
+    def get_pr_auto(self) -> bool:
+        """Whether PR is enabled with no partition given, so the build picks it (buildtools/pr_auto.py)."""
+        return self.pr_auto
 
     def get_pr_region(self) -> Optional[str]:
         """Nested-DFX RP region for a base build (None = the flow's default)."""
