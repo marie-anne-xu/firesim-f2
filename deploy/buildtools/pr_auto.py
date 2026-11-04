@@ -60,7 +60,7 @@ def _stem(mod: str) -> str:
 
 def diff(a: Manifest, b: Manifest) -> Dict[str, Any]:
     """Changed instances of b against a: `pairs` maps each new path to (old module, new module); `cuts` are the
-    lowest ancestors with unchanged ports covering every change (same algorithm as firrtl_pass/chisel_diff.py)."""
+    lowest ancestors with unchanged ports covering every change."""
     sys.setrecursionlimit(200000)
     dirty: List[str] = []
     added: List[str] = []
@@ -149,45 +149,66 @@ def plan(manifest_path: str, results_build_dir: str) -> Dict[str, Any]:
         if r["role"] != "base":
             continue
         d = diff(Manifest(r["manifest_path"]), new)
-        rp = r["rp_path"]
-        # rp outside `pairs` lies in a subtree that did not change at all
-        if rp in new.module_at and (rp not in d["pairs"] or d["stable"](rp)) and new.uses[new.module_at[rp]] == 1 \
-                and all(_under(c, rp) for c in d["cuts"]):
-            return {"role": "child", "rp_path": rp, "rp_module": new.module_at[rp],
-                    "rp_target": _instance_target(new, rp), "base_dir": r["dir"], "cuts": d["cuts"],
-                    "reason": f"all {len(d['cuts'])} change(s) inside RP {rp} of base {os.path.basename(r['dir'])}"}
+        rps = r.get("rp_paths") or [r["rp_path"]]
+        # an RP outside `pairs` lies in a subtree that did not change at all
+        if all(rp in new.module_at and (rp not in d["pairs"] or d["stable"](rp)) and new.uses[new.module_at[rp]] == 1
+               for rp in rps) and all(any(_under(c, rp) for rp in rps) for c in d["cuts"]):
+            changed = [rp for rp in rps if any(_under(c, rp) for c in d["cuts"])]
+            return {"role": "child", **_rp_fields(new, rps), "changed_rp_paths": changed, "base_dir": r["dir"],
+                    "cuts": d["cuts"],
+                    "reason": f"all {len(d['cuts'])} change(s) inside RP(s) {', '.join(changed)} of base "
+                              f"{os.path.basename(r['dir'])}"}
 
     if not records:
         return {"role": "flat", "reason": "no earlier automatic build to compare against"}
-    # New base: the smallest RP covering the changes against any earlier automatic build (branching iterations).
+    # New base: disjoint RPs covering the changes against any earlier automatic build, smallest total first.
     best: Optional[Dict[str, Any]] = None
     for r in records:
         d = diff(Manifest(r["manifest_path"]), new)
         if not d["cuts"]:
             continue
-        rp = os.path.commonpath(d["cuts"])  # paths are '/'-separated instance names
-        while rp != new.top and new.uses[new.module_at[rp]] != 1:
-            rp = rp.rsplit("/", 1)[0]
-        frac = new.size(new.module_at[rp]) / new.size(new.top)
+        sticky = [p for p in (r.get("rp_paths") or ([r["rp_path"]] if r.get("rp_path") else []))
+                  if r["role"] == "base" and p in new.module_at]
+        rps = _group(new, d["cuts"] + sticky)
+        frac = sum(new.size(new.module_at[p]) for p in rps) / new.size(new.top)
         if best is None or frac < best["rp_fraction"]:
-            best = {"rp_path": rp, "rp_fraction": round(frac, 4), "cuts": d["cuts"], "ref": os.path.basename(r["dir"])}
+            best = {"rp_paths": rps, "rp_fraction": round(frac, 4), "cuts": d["cuts"], "ref": os.path.basename(r["dir"])}
     if best is None:
         return {"role": "flat", "reason": "no change against an earlier automatic build and no base covers it"}
-    rp, frac = best["rp_path"], best["rp_fraction"]
-    if rp == new.top or frac > MAX_RP_FRACTION:
+    rps, frac = best["rp_paths"], best["rp_fraction"]
+    if new.top in rps or frac > MAX_RP_FRACTION:
         return {"role": "flat", "cuts": best["cuts"],
-                "reason": f"changes span {rp} ({frac:.0%} of the design) against {best['ref']}"}
-    return {"role": "base", "rp_path": rp, "rp_module": new.module_at[rp], "rp_target": _instance_target(new, rp),
-            "cuts": best["cuts"], "rp_fraction": frac,
-            "reason": f"{len(best['cuts'])} change(s) against {best['ref']}; RP = their common ancestor {rp} "
+                "reason": f"changes need {', '.join(rps)} ({frac:.0%} of the design) against {best['ref']}"}
+    return {"role": "base", **_rp_fields(new, rps), "cuts": best["cuts"], "rp_fraction": frac,
+            "reason": f"{len(best['cuts'])} change(s) against {best['ref']}; {len(rps)} RP(s) {', '.join(rps)} "
                       f"({frac:.1%} of the design)"}
+
+
+def _unique(m: Manifest, p: str) -> str:
+    while p != m.top and m.uses[m.module_at[p]] != 1:
+        p = p.rsplit("/", 1)[0]
+    return p
+
+
+def _group(m: Manifest, paths: List[str]) -> List[str]:
+    """One RP per changed module (each walked up to a unique module); RPs are never merged, only an RP nested
+    inside another is dropped (keep granularity)."""
+    rps = {_unique(m, p) for p in paths}
+    return sorted(p for p in rps if not any(p != o and _under(p, o) for o in rps))
+
+
+def _rp_fields(m: Manifest, rps: List[str]) -> Dict[str, Any]:
+    return {"rp_paths": rps, "rp_modules": [m.module_at[p] for p in rps],
+            "rp_targets": [_instance_target(m, p) for p in rps]}
 
 
 def annotations(p: Dict[str, Any]) -> List[Dict[str, str]]:
     """Golden Gate annotations for a plan: mark the RP (its ports are then kept as written)."""
     if p["role"] == "flat":
         return []
-    return [{"class": "midas.targetutils.FirrtlReconfigurablePartitionAnnotation", "target": p["rp_target"]}]
+    top = p["rp_targets"][0].split("|")[0]
+    return [{"class": "midas.targetutils.FirrtlReconfigurablePartitionAnnotation", "target": t} for t in p["rp_targets"]] \
+        + [{"class": "firrtl.transforms.NoDedupAnnotation", "target": f"{top}|{m}"} for m in p["rp_modules"]]
 
 
 def record(p: Dict[str, Any], manifest_path: str, local_results_dir: str) -> None:

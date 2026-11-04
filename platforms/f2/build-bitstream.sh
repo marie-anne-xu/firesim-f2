@@ -18,7 +18,7 @@ usage() {
     echo "   --pr_module_name  : Name(s) of the PR module(s), comma-separated if multiple (required if --enable_pr is true)"
     echo "   --pr_partition_path : Hierarchical path(s) to the PR partition(s), comma-separated if multiple (optional; discovered at synthesis if omitted)"
     echo "   --pr_base_dcp     : Path to a base build's post_route.dcp (optional, if specified uses main_pr_rm.tcl instead of the parent flow)"
-    echo "   --pr_region       : Nested RP region for the parent flow, e.g. CLOCKREGION_X1Y8:CLOCKREGION_X1Y8 (default: pr_nested_region in pr_utils.tcl)"
+    echo "   --pr_region       : Nested RP region(s) for the parent flow, one per RP in --pr_module_name order, ';'-separated, e.g. CLOCKREGION_X1Y8:CLOCKREGION_X2Y8 (default: derived from where each RP places)"
     echo "   --build_tag       : Pin the build tag so parent and child agree on checkpoint names (optional, defaults to a timestamp)"
     echo "   --help      : Display this message"
     exit "$1"
@@ -190,10 +190,12 @@ echo "PR: child (RM swap) build"
 echo "PR:   module   : $PR_MODULE_NAME"
 echo "PR:   base DCP : $PR_BASE_DCP"
 
-RM_DCP="$CL_DIR/build/checkpoints/${PR_MODULE_NAME}.${BUILD_TAG}.rm_post_synth.dcp"
-
-# 1. Synthesize the new RM out of context.
-vivado -mode batch -source $CL_DIR/build/scripts/synth_cl_firesim_rm.tcl -log ${BUILD_TAG}.rm_synth.vivado.log -tclargs --cl_dir "$CL_DIR" --build_tag "$BUILD_TAG" --pr_module_name "$PR_MODULE_NAME" --frequency "$FREQUENCY" --device_type "$DEVICE_TYPE"
+# 1. Synthesize each new RM out of context (comma-separated modules; the i-th goes into the i-th partition path).
+RM_DCP=""
+for MOD in ${PR_MODULE_NAME//,/ } ; do
+    vivado -mode batch -source $CL_DIR/build/scripts/synth_cl_firesim_rm.tcl -log ${BUILD_TAG}.${MOD}.rm_synth.vivado.log -tclargs --cl_dir "$CL_DIR" --build_tag "$BUILD_TAG" --pr_module_name "$MOD" --frequency "$FREQUENCY" --device_type "$DEVICE_TYPE"
+    RM_DCP="${RM_DCP:+$RM_DCP,}$CL_DIR/build/checkpoints/${MOD}.${BUILD_TAG}.rm_post_synth.dcp"
+done
 
 # 2. Swap it into the locked base and write the AWS export.
 PR_PATH_ARG=""
@@ -201,11 +203,14 @@ if [ -n "$PR_PARTITION_PATH" ] ; then
     PR_PATH_ARG="--pr_partition_path $PR_PARTITION_PATH"
 fi
 
-# RapidWright routes the RM (scripts/rw); per-base inputs first.
+# RapidWright routes the RM (scripts/rw; one RM in a one-RP base only); per-base inputs first.
+RW_ARG=""
+if [[ "$PR_MODULE_NAME" != *,* && "$PR_PARTITION_PATH" != *,* ]] ; then
 RW_BASE_DIR="$CL_DIR/build/checkpoints/rw_base"
 RW_ARG="--rw_base_dir $RW_BASE_DIR"
 vivado -mode batch -source $CL_DIR/build/scripts/rw/main_pr_rwfst_base.tcl -log ${BUILD_TAG}.rw_base.vivado.log -tclargs --base_dcp "$PR_BASE_DCP" --out_dir "$RW_BASE_DIR" \
     || { echo "PR: RapidWright base prep failed; using the normal pr flow"; RW_ARG=""; }
+fi
 
 vivado -mode batch -source $CL_DIR/build/scripts/main_pr_rm.tcl -log ${BUILD_TAG}.rm_swap.vivado.log -tclargs --cl_dir "$CL_DIR" --build_tag "$BUILD_TAG" --cl_name "$CL_NAME" --base_dcp "$PR_BASE_DCP" --rm_dcp "$RM_DCP" $PR_PATH_ARG $RW_ARG
 

@@ -374,13 +374,22 @@ class F2BitBuilder(BitBuilder):
         if self.pr_plan is not None:
             # Automatic PR: replace_rtl's plan gives the RP module (base, child) and the base build (child).
             enable_pr = self.pr_plan["role"] != "flat"
-            pr_module_name = [self.pr_plan["rp_module"]] if enable_pr else None
+            pr_module_name = self.pr_plan["rp_modules"] if enable_pr else None
 
         # The base build's CL directory in results-build (child builds only).
         base_cl_dir = None
         if self.pr_plan is not None and self.pr_plan["role"] == "child":
             base_cl_dir = sorted(glob.glob(f"{self.pr_plan['base_dir']}/cl_*"))[-1]
             rootLogger.info(f"Automatic PR: child of base {base_cl_dir}")
+            # Swap only the changed RPs. The base's pr_partition_paths.txt lists its Vivado RP paths in plan RP order.
+            with open(glob.glob(f"{base_cl_dir}/build/checkpoints/*.pr_partition_paths.txt")[0]) as f:
+                base_paths = [l.strip().split(":", 1)[1] for l in f if l.strip()]
+            if len(base_paths) != len(self.pr_plan["rp_paths"]):
+                raise Exception(f"base {base_cl_dir} has {len(base_paths)} RP paths, plan has {len(self.pr_plan['rp_paths'])}")
+            idx = [self.pr_plan["rp_paths"].index(p) for p in self.pr_plan["changed_rp_paths"]]
+            pr_module_name = [self.pr_plan["rp_modules"][i] for i in idx]
+            pr_partition_path = [base_paths[i] for i in idx]
+            rootLogger.info(f"Automatic PR: swapping {', '.join(pr_module_name)} into {', '.join(pr_partition_path)}")
 
         # Resolve pr_base_recipe to the base build's routed DCP.
         if enable_pr and pr_base_recipe and not pr_base_dcp:
